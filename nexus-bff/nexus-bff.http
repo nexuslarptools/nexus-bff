@@ -1,0 +1,6 @@
+@nexus_bff_HostAddress = http://localhost:5192
+
+GET {{nexus_bff_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
