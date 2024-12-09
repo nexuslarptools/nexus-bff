@@ -1,41 +1,67 @@
+using Duende.Bff.Yarp;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+builder.Services.AddControllers();
+builder.Services.AddBff()
+    .AddRemoteApis();
+
+builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultScheme = "cookie";
+        options.DefaultChallengeScheme = "oidc";
+        options.DefaultSignOutScheme = "oidc";
+    })
+    .AddCookie("cookie", options =>
+    {
+        options.Cookie.Name = "__Host-Standalone-bff";
+        options.Cookie.SameSite = SameSiteMode.Strict;
+    })
+    .AddOpenIdConnect("oidc", options =>
+    {
+        options.Authority = Environment.GetEnvironmentVariable("AUTH_AUTHORITY");
+        options.ClientId = Environment.GetEnvironmentVariable("AUTH_CLIENT_ID");
+        options.ClientSecret = Environment.GetEnvironmentVariable("AUTH_CLIENT_SECRET");
+        options.ResponseType = "code";
+        options.ResponseMode = "query";
+        options.UsePkce = true;
+
+        options.GetClaimsFromUserInfoEndpoint = true;
+        options.MapInboundClaims = false;
+        options.SaveTokens = true;
+
+        options.RequireHttpsMetadata = !builder.Environment.IsDevelopment();
+
+        options.Scope.Clear();
+        options.Scope.Add("openid");
+        options.Scope.Add("profile");
+        options.Scope.Add("recipe_management");
+
+        options.TokenValidationParameters = new()
+        {
+            NameClaimType = "name",
+            RoleClaimType = "role"
+        };
+    });
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+app.UseRouting();
+
+app.UseAuthentication();
+app.UseBff();
+app.UseAuthorization();
+
+app.MapBffManagementEndpoints();
+
+app.MapControllers()
+    .RequireAuthorization()
+    .AsBffApiEndpoint();
+
+app.UseEndpoints(endpoints =>
 {
-    app.MapOpenApi();
-}
+    endpoints.MapRemoteBffApiEndpoint("/api", "https://localhost:5375/api")
+        .RequireAccessToken();
+});
 
-app.UseHttpsRedirection();
-
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-    {
-        var forecast = Enumerable.Range(1, 5).Select(index =>
-                new WeatherForecast
-                (
-                    DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-                    Random.Shared.Next(-20, 55),
-                    summaries[Random.Shared.Next(summaries.Length)]
-                ))
-            .ToArray();
-        return forecast;
-    })
-    .WithName("GetWeatherForecast");
-
-app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
+await app.RunAsync();
